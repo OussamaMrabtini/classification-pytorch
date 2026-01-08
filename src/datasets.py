@@ -13,7 +13,7 @@ class Dataset(Dataset):
         """
         self.root_dir = root_dir
         self.transform = transform
-        self.classes = ['sea', 'forest']
+        self.classes = ['cat', 'dog']
         self.class_to_idx = {cls: i for i, cls in enumerate(self.classes)}
         self.mode = mode
         self.imgs = self._make_dataset()
