@@ -2,7 +2,7 @@ train:
   batch_size: 16
   max_epochs: 5
   learning_rate: 0.00001
-  freeze_backbone: true
+  freeze_backbone: false
   patience: 10
   k_folds: 5
 
