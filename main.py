@@ -190,16 +190,9 @@ def main(args):
         k_folds = config.params['train']['k_folds']
         kfold = KFold(n_splits=k_folds, shuffle=True, random_state=42)
 
-        # Log experiment-level parameters to MLflow only if enabled
+        # Setup MLflow only if enabled (don't start a run here)
         if args.use_mlflow:
             setup_mlflow(args.use_mlflow)
-            mlflow.log_param("k_folds", k_folds)
-            mlflow.log_param("total_samples", len(dataset))
-            mlflow.log_param("dataset_path", args.data_path)
-            # Log DVC info if enabled
-            if config.params['dvc']['enabled']:
-                mlflow.log_param("dvc_enabled", True)
-                mlflow.log_param("dvc_remote", config.params['dvc']['remote'])
 
         logging.info("=" * 50)
         logging.info(f"STARTING {k_folds}-FOLD CROSS VALIDATION")
@@ -249,6 +242,7 @@ def main(args):
             ''')
 
             # Train the model for this fold
+            # Each fold creates its own MLflow run inside train_classifier
             fold_history = train_classifier(
                 model, train_loader, val_loader, criterion, optimizer, config.MAX_EPOCHS_NUM,
                 config.MODEL_DIR, config.PLOTS_DIR, device, config.BACKBONE, config.FREEZE_BACKBONE,
@@ -260,7 +254,7 @@ def main(args):
             if device.type == 'cuda':
                 torch.cuda.empty_cache()
 
-        # Log cross-validation summary and save DVC metrics
+        # Log cross-validation summary
         if fold_histories:
             avg_best_val_loss = sum(h['best_val_loss'] for h in fold_histories) / len(fold_histories)
             avg_best_val_accuracy = sum(h['best_val_accuracy'] for h in fold_histories) / len(fold_histories)
@@ -268,15 +262,34 @@ def main(args):
             # Save DVC metrics
             cv_metrics_path = save_cv_metrics(fold_histories, config.PLOTS_DIR)
 
+            # Log aggregate metrics in a summary run if MLflow is enabled
             if args.use_mlflow:
-                mlflow.log_metrics({
-                    "cv_avg_best_val_loss": avg_best_val_loss,
-                    "cv_avg_best_val_accuracy": avg_best_val_accuracy
-                })
+                summary_run_name = f"cv_summary_{datetime.now().strftime('%H%M%S')}"
+                with mlflow.start_run(run_name=summary_run_name) as summary_run:
+                    mlflow.log_params({
+                        "mode": "cross_validation_summary",
+                        "k_folds": k_folds,
+                        "total_samples": len(dataset),
+                        "dataset_path": args.data_path,
+                        "backbone": config.BACKBONE,
+                        "freeze_backbone": config.FREEZE_BACKBONE
+                    })
 
-                # Log DVC metrics file to MLflow
-                if cv_metrics_path and os.path.exists(cv_metrics_path):
-                    mlflow.log_artifact(cv_metrics_path, "dvc_metrics")
+                    # Log DVC info if enabled
+                    if config.params['dvc']['enabled']:
+                        mlflow.log_params({
+                            "dvc_enabled": True,
+                            "dvc_remote": config.params['dvc']['remote']
+                        })
+
+                    mlflow.log_metrics({
+                        "cv_avg_best_val_loss": avg_best_val_loss,
+                        "cv_avg_best_val_accuracy": avg_best_val_accuracy
+                    })
+
+                    # Log DVC metrics file to MLflow
+                    if cv_metrics_path and os.path.exists(cv_metrics_path):
+                        mlflow.log_artifact(cv_metrics_path, "dvc_metrics")
 
             logging.info('')
             logging.info("=" * 50)
